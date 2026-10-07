@@ -205,7 +205,7 @@ systemctl daemon-reload
 systemctl enable --now tproxy-server
 
 # 4. Экспорт переменной для родительского скрипта autoXRAY
-export MTProto="tg://webproxy?server=${DOMAIN}&secret=${SECRET}"
+export MTProto="tg://webproxy?server=${DOMAIN}&port=443&secret=${SECRET}"
 
 sleep 2
 if systemctl is-active --quiet telemt && systemctl is-active --quiet tproxy-server; then

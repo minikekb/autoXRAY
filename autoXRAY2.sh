@@ -27,7 +27,7 @@ fi
 KEYRING_PKG=$([ "$ID" = "ubuntu" ] && echo "ubuntu-keyring" || echo "debian-archive-keyring")
 
 echo -e "${YEL}Подготовка официального репозитория Nginx для $ID ($VERSION_CODENAME)...${NC}"
-apt-get update && apt-get install -y curl gnupg2 ca-certificates lsb-release $KEYRING_PKG jq dnsutils openssl wget tar socat cron gettext-base
+apt-get update && apt-get install -y curl gnupg2 ca-certificates $KEYRING_PKG dnsutils openssl wget tar cron gettext-base
 
 # Добавление ключа и репозитория nginx.org
 curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor --yes -o /usr/share/keyrings/nginx-archive-keyring.gpg
@@ -59,52 +59,22 @@ if [ "$LOCAL_IP" != "$DNS_IP" ]; then
     echo -e "${YEL}Продолжение выполнения скрипта...${NC}"
 fi
 
-# === ВОПРОСЫ ПОЛЬЗОВАТЕЛЮ ===
-read -p "$(echo -e "\n${YEL}Устанавливать Web Proxy для Telegram? (y/n, по умолчанию y): ${NC}")" choice_mtp
-choice_mtp=${choice_mtp:-y}
-if [[ "$choice_mtp" =~ ^[Yy]$ ]]; then
-    INSTALL_MTP=true
-    NGINX_web_proxy='    # web proxy
-    location / {
+# Telegram Web Proxy обязателен и доступен на внешнем порту 443.
+NGINX_web_proxy='    location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-
         proxy_buffering off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }'
-else
-    INSTALL_MTP=false
-    NGINX_web_proxy='    location / {
-        try_files $uri $uri/ =404;
-    }'
-fi
 
-echo -e "\n${YEL}Выберите TLS fingerprint для маскировки трафика:${NC}"
-echo "1) chrome    3) safari   5) android   7) 360"
-echo "2) firefox   4) ios      6) edge      8) qq"
-read -p "Введите номер [1-8] (по умолчанию 2 - firefox): " fp_choice
-
-case $fp_choice in
-    1) fpBro="chrome" ;;
-    2) fpBro="firefox" ;;
-    3) fpBro="safari" ;;
-    4) fpBro="ios" ;;
-    5) fpBro="android" ;;
-    6) fpBro="edge" ;;
-    7) fpBro="360" ;;
-    8) fpBro="qq" ;;
-    *) fpBro="firefox" ;;
-esac
-# ============================
+fpBro="chrome"
 
 # Включаем BBR, MTU Probing и расширенные TCP-буферы ядра
 cat <<EOF > /etc/sysctl.d/999-autoXRAY.conf
@@ -211,31 +181,7 @@ else
 fi
 # ==========================================
 
-path_xhttp=$(openssl rand -base64 15 | tr -dc 'a-z0-9' | head -c 6)
 path_subpage=$(openssl rand -base64 15 | tr -dc 'A-Za-z0-9' | head -c 20)
-
-AUTH_VARIANTS=(
-    "ERR_INVALID_CREDENTIALS|The username or password you entered is incorrect."
-    "ERR_INVALID_CREDENTIALS|The identity or security key you provided is invalid."
-    "ERR_BAD_PASSWORD|Incorrect password. Please verify your credentials and retry."
-    "ERR_KEY_MISMATCH|The security key provided does not match the account identity."
-    "ERR_CREDENTIAL_REJECTED|Credential verification rejected by the authentication authority."
-    "ERR_PASSWORD_MISMATCH|The password provided does not match the registered key."
-    "ERR_INCORRECT_KEY|Incorrect security credentials provided for this principal."
-    "ERR_USER_NOT_FOUND|Principal identity not found in directory services."
-    "ERR_IDENTITY_NOT_FOUND|No account found matching the provided identity."
-    "ERR_PRINCIPAL_MISSING|User principal does not exist in this organizational realm."
-    "ERR_ACCOUNT_NOT_FOUND|Account identifier not recognized by the identity provider."
-    "ERR_UNKNOWN_USER|Unrecognized user identity. Please verify your login."
-    "ERR_LOOKUP_FAILED|User lookup failed: Specified identity does not exist."
-    "ERR_AUTH_FAILED|Authentication failed: The provided credentials do not match."
-    "ERR_DIRECTORY_MISMATCH|Credentials could not be verified against the corporate directory."
-    "ERR_RECORDS_MISMATCH|The security credentials entered do not match our records."
-)
-
-RAND_AUTH=${AUTH_VARIANTS[$RANDOM % ${#AUTH_VARIANTS[@]}]}
-AUTH_CODE=$(echo "$RAND_AUTH" | cut -d'|' -f1)
-AUTH_MSG=$(echo "$RAND_AUTH" | cut -d'|' -f2)
 
 # Конфиг Nginx с ОЗУ-буферами для высокой скорости отдачи
 cat <<EOF > "$CONFIG_PATH"
@@ -249,10 +195,10 @@ map \$http_upgrade \$connection_upgrade {
 
 server {
     server_name $DOMAIN;
-    listen unix:/dev/shm/nginx.sock proxy_protocol;
-
-    set_real_ip_from unix:;
-    real_ip_header proxy_protocol;
+    listen 127.0.0.1:8443 ssl;
+    ssl_certificate /var/lib/xray/cert/fullchain.pem;
+    ssl_certificate_key /var/lib/xray/cert/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
 
     server_tokens off;
     access_log off;
@@ -272,39 +218,6 @@ server {
         try_files \$uri =404;
     }
 
-    # XHTTP endpoint (режим stream-up через gRPC-модуль Nginx с буферами 512k)
-    location /${path_xhttp} {
-        client_max_body_size 0;
-        client_body_buffer_size 512k;
-        grpc_buffer_size 64k;
-
-        client_body_timeout 120s;
-        grpc_read_timeout 180s;
-        grpc_send_timeout 180s;
-        grpc_socket_keepalive on;
-
-        grpc_set_header Host \$host;
-        grpc_set_header X-Real-IP \$remote_addr;
-        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-
-        grpc_pass grpc://127.0.0.1:3333;
-    }
-
-    # Для сайта
-    location /api/v1/authenticate {
-        limit_except POST {
-            deny all;
-        }
-
-        default_type application/json;
-
-        add_header Set-Cookie "X-Auth-Token=\$request_id; Path=/; HttpOnly; Secure; SameSite=Lax" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
-
-        return 401 '{"success":false,"code":"$AUTH_CODE","message":"$AUTH_MSG","request_id":"\$request_id"}';
-    }
-	
 $NGINX_web_proxy
 
     location ~ /\.ht {
@@ -334,12 +247,20 @@ SCRIPT_DIR=/usr/local/etc/xray
 # Генерируем ключи и переменные
 xray_uuid_vrv=$(xray uuid)
 xray_shortIds_vrv=$(openssl rand -hex 8)
+reality_keys=$(xray x25519)
+xray_reality_private=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/PrivateKey:/ {print $2; exit}')
+xray_reality_public=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/Password:/ {print $2; exit}')
+[[ -n "$xray_reality_public" ]] || xray_reality_public=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/Public key:/ {print $2; exit}')
+if [[ -z "$xray_reality_private" || -z "$xray_reality_public" ]]; then
+    echo -e "${RED}❌ Не удалось получить ключи REALITY из xray x25519.${NC}"
+    exit 1
+fi
 
 socksUser=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 6)
 socksPasw=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 16)
 
 # Экспортируем переменные для envsubst
-export xray_uuid_vrv xray_shortIds_vrv DOMAIN path_subpage path_xhttp WEB_PATH socksUser socksPasw fpBro
+export xray_uuid_vrv xray_shortIds_vrv xray_reality_private xray_reality_public DOMAIN path_subpage WEB_PATH socksUser socksPasw
 
 # Создаем JSON конфигурацию сервера Xray
 cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
@@ -361,132 +282,27 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
   },
   "inbounds": [
     {
-      "tag": "vsRAWtlsVISION",
-      "port": 443,
-      "listen": "0.0.0.0",
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "flow": "xtls-rprx-vision",
-            "id": "${xray_uuid_vrv}"
-          }
-        ],
-        "decryption": "none",
-        "fallbacks": [
-          {
-            "dest": "/dev/shm/nginx.sock",
-            "xver": 2
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "tls",
-        "tlsSettings": {
-          "certificates": [
-            {
-              "certificateFile": "/var/lib/xray/cert/fullchain.pem",
-              "keyFile": "/var/lib/xray/cert/privkey.pem"
-            }
-          ],
-          "minVersion": "1.2",
-          "cipherSuites": "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", 
-          "alpn": [
-            "h2", "http/1.1"
-          ]
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ]
-      }
-    },
-    {
-      "tag": "Hysteria2",
+      "tag": "vless-reality-vision",
       "listen": "0.0.0.0",
       "port": 443,
-      "protocol": "hysteria",
-      "settings": {
-        "version": 2,
-        "clients": [
-          {
-            "auth": "${xray_shortIds_vrv}"
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "hysteria",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "$DOMAIN",
-          "alpn": [
-            "h3"
-          ],
-          "certificates": [
-            {
-              "usage": "encipherment",
-              "certificateFile": "/var/lib/xray/cert/fullchain.pem",
-              "keyFile": "/var/lib/xray/cert/privkey.pem"
-            }
-          ]
-        },
-        "hysteriaSettings": {
-          "version": 2
-        },
-        "finalmask": {
-          "quicParams": {
-            "congestion": "brutal",
-            "brutalUp": "100 mbps",
-            "brutalDown": "100 mbps"
-          }
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ]
-      }
-    },
-    {
-      "tag": "vsXHTTPtls",
-      "port": 3333,
-      "listen": "127.0.0.1",
       "protocol": "vless",
       "settings": {
-        "clients": [
-          {
-            "id": "${xray_uuid_vrv}"
-          }
-        ],
+        "clients": [{"id": "${xray_uuid_vrv}", "flow": "xtls-rprx-vision"}],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "xhttp",
-        "xhttpSettings": {
-          "mode": "stream-up",
-          "path": "/${path_xhttp}"
-        },
-        "security": "none",
-        "sockopt": {
-          "acceptProxyProtocol": false
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "127.0.0.1:8443",
+          "xver": 0,
+          "serverNames": ["${DOMAIN}"],
+          "privateKey": "${xray_reality_private}",
+          "shortIds": ["${xray_shortIds_vrv}"]
         }
       },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ]
-      }
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"]}
     },
     {
       "tag": "socks5",
@@ -517,20 +333,7 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
     {
       "tag": "block",
       "protocol": "blackhole"
-    },
-	{
-	  "tag": "warp",
-	  "protocol": "socks",
-	  "settings": {
-		"servers": [
-		  {
-			"address": "127.0.0.1",
-			"port": 40000
-		  }
-		]
-	  },
-	  "targetStrategy": "ForceIPv4v6"
-	}
+    }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
@@ -723,109 +526,30 @@ print_config() {
 TPL
 }
 
-# --- Config 1: VLESS XHTTP TLS (Оптимальный для личного сервера: Stealth + High Upload + Буфер 20)
-OUT_XHTTP='{
+# --- VLESS RAW REALITY VISION (TCP/443)
+OUT_REALITY='{
   "tag": "proxy",
   "protocol": "vless",
   "settings": {
-    "vnext": [{
-      "address": "$DOMAIN",
-      "port": 443,
-      "users": [{ "id": "${xray_uuid_vrv}", "encryption": "none" }]
-    }]
-  },
-  "streamSettings": {
-    "network": "xhttp",
-    "xhttpSettings": {
-      "mode": "stream-up",
-      "path": "/${path_xhttp}",
-      "extra": {
-        "noGRPCHeader": false,
-        "xPaddingBytes": "150-400",
-        "scMaxEachPostBytes": 500000,
-        "scMinPostsIntervalMs": "5-15",
-        "scMaxBufferedPosts": 20,
-        "scStreamUpServerSecs": "90-180",
-        "xmux": {
-          "maxConcurrency": "2-4",
-          "cMaxReuseTimes": "800-1500",
-          "hMaxReusableSecs": "900-1200"
-        }
-      }
-    },
-    "security": "tls",
-    "tlsSettings": {
-      "serverName": "$DOMAIN",
-      "alpn": [
-        "h2"
-      ],
-      "fingerprint": "$fpBro"
-    }
-  }
-}'
-
-# --- Config 2: VLESS RAW TLS VISION (Port 443 TCP)
-OUT_VISION='{
-  "tag": "proxy",
-  "protocol": "vless",
-  "settings": {
-    "vnext": [{
-      "address": "$DOMAIN",
-      "port": 443,
-      "users": [{ "id": "${xray_uuid_vrv}", "flow": "xtls-rprx-vision", "encryption": "none" }]
-    }]
+    "vnext": [{"address": "${DOMAIN}", "port": 443, "users": [{"id": "${xray_uuid_vrv}", "flow": "xtls-rprx-vision", "encryption": "none"}]}]
   },
   "streamSettings": {
     "network": "raw",
-    "security": "tls",
-    "tlsSettings": {
-      "serverName": "$DOMAIN",
-      "fingerprint": "$fpBro"
+    "security": "reality",
+    "realitySettings": {
+      "serverName": "${DOMAIN}",
+      "fingerprint": "${fpBro}",
+      "password": "${xray_reality_public}",
+      "shortId": "${xray_shortIds_vrv}",
+      "spiderX": "/"
     }
   }
 }'
 
-# --- Config 3: HYSTERIA2 (Port 443 UDP)
-HYSTERIA2='{
-"tag": "proxy",
-"protocol": "hysteria",
-"settings": {
-	"address": "$DOMAIN",
-	"port": 443,
-	"version": 2
-},
-"streamSettings": {
-	"network": "hysteria",
-	"security": "tls",
-	"tlsSettings": {
-		"serverName": "$DOMAIN",
-		"alpn": [
-			"h3"
-		],
-		"fingerprint": "$fpBro"
-	},
-	"hysteriaSettings": {
-		"version": 2,
-		"auth": "${xray_shortIds_vrv}"
-	},
-	"finalmask": {
-		"quicParams": {
-			"congestion": "brutal",
-			"brutalUp": "100 mbps",
-			"brutalDown": "100 mbps"
-		}
-	}
-}
-}'
-
-# Порядок в клиентском конфиге: XHTTP -> RAW VISION -> HYSTERIA2
+# В подписку добавляется только VLESS REALITY.
 (
   echo "["
-  print_config "$OUT_XHTTP"     "🇪🇺 VLESS XHTTP TLS stream-up"
-  echo ","
-  print_config "$OUT_VISION"    "🇪🇺 VLESS RAW TLS VISION"
-  echo ","
-  print_config "$HYSTERIA2"      "🇪🇺 HYSTERIA2"
+  print_config "$OUT_REALITY" "🇪🇺 VLESS REALITY VISION"
   echo "]"
 ) | envsubst > "$WEB_PATH/$path_subpage.json"
 
@@ -835,26 +559,19 @@ echo -e "Перезапуск XRAY"
 # Формирование ссылок
 subPageLink="https://$DOMAIN/$path_subpage.json"
 
-linkTLS2="vless://${xray_uuid_vrv}@$DOMAIN:443?security=tls&alpn=h2&type=xhttp&mode=stream-up&path=%2F${path_xhttp}&extra=%7B%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22150-400%22%2C%22scMaxEachPostBytes%22%3A500000%2C%22scMinPostsIntervalMs%22%3A%225-15%22%2C%22scMaxBufferedPosts%22%3A20%2C%22scStreamUpServerSecs%22%3A%2290-180%22%2C%22xmux%22%3A%7B%22maxConcurrency%22%3A%222-4%22%2C%22cMaxReuseTimes%22%3A%22800-1500%22%2C%22hMaxReusableSecs%22%3A%22900-1200%22%7D%7D&sni=$DOMAIN&fp=$fpBro#vlessXHTTPtls-stream-up"
-linkTLS1="vless://${xray_uuid_vrv}@$DOMAIN:443?security=tls&type=tcp&headerType=&path=&host=&flow=xtls-rprx-vision&sni=$DOMAIN&fp=$fpBro&spx=%2F#vlessRAWtlsVision-autoXRAY"
-hy2="hy2://${xray_shortIds_vrv}@$DOMAIN:443/?sni=$DOMAIN&alpn=h3#Hysteria2"
+linkREALITY="vless://${xray_uuid_vrv}@$DOMAIN:443?type=tcp&security=reality&pbk=$xray_reality_public&fp=$fpBro&sni=$DOMAIN&sid=$xray_shortIds_vrv&spx=%2F&flow=xtls-rprx-vision#VLESS-REALITY"
 
 configListLink="https://$DOMAIN/$path_subpage.html"
 
 CONFIGS_ARRAY=(
-    "VLESS XHTTP TLS stream-up (для моста)|$linkTLS2"
-    "VLESS RAW TLS VISION|$linkTLS1"
-    "HYSTERIA2|$hy2"
+    "VLESS REALITY VISION|$linkREALITY"
 )
 ALL_LINKS_TEXT=""
 
-if [ "$INSTALL_MTP" = true ]; then
-    echo -e "\n\n${GRN}Устанавливаем Telegram Web Proxy ${NC}"
-    source <(curl -sL https://raw.githubusercontent.com/xVRVx/autoXRAY/refs/heads/main/test/telegram/web-proxy.sh)
-else
-    echo -e "\n\n${YEL}Установка Telegram Web Proxy пропущена.${NC}"
-    MTProto=""
-fi
+echo -e "\n\n${GRN}Устанавливаем Telegram Web Proxy ${NC}"
+source <(curl -sL https://raw.githubusercontent.com/xVRVx/autoXRAY/refs/heads/main/test/telegram/web-proxy.sh)
+# Фиксируем внешний порт в ссылке для Telegram.
+MTProto="tg://webproxy?server=${DOMAIN}&port=443&secret=${SECRET}"
 
 # --- ЗАПИСЬ HEAD (СТАТИКА, МИНИФИЦИРОВАННЫЕ СТИЛИ И JS) ---
 cat > "$WEB_PATH/$path_subpage.html" <<'EOF'
@@ -916,7 +633,7 @@ cat >> "$WEB_PATH/$path_subpage.html" <<EOF
 <h2>➡️ Конфиги</h2>
 EOF
 
-# Цикл генерации строк конфигов (XHTTP -> RAW VISION -> HY2)
+# Отображение единственной VLESS REALITY конфигурации
 idx=1
 for item in "${CONFIGS_ARRAY[@]}"; do
     title="${item%%|*}"
@@ -936,7 +653,6 @@ EOF
 done
 
 # Добавляем Web Proxy блок (чистые tg:// ссылки)
-if [ "$INSTALL_MTP" = true ]; then
 cat >> "$WEB_PATH/$path_subpage.html" <<EOF
 <div class="config-row">
     <div class="config-label">Telegram Web Proxy</div>
@@ -945,7 +661,6 @@ cat >> "$WEB_PATH/$path_subpage.html" <<EOF
     <a href="${MTProto}" target="_blank" class="btn-action qr-btn" title="автодобавление прокси в тг" style="text-decoration:none">✈️ Add to TG</a>
 </div>
 EOF
-fi
 
 # Дописываем конец страницы
 cat >> "$WEB_PATH/$path_subpage.html" <<EOF
@@ -964,10 +679,8 @@ EOF
 # --- ФИНАЛЬНАЯ ПРОВЕРКА ---
 echo -e "\n${YEL}=== Финальная проверка статусов ===${NC}"
 
-if [ "$INSTALL_MTP" = true ]; then
-    if systemctl is-active --quiet telemt; then echo -e "Telemt: ${GRN}RUNNING${NC}"; else echo -e "Telemt: ${RED}STOPPED/ERROR${NC}"; fi
-    if systemctl is-active --quiet tproxy-server; then echo -e "WebProxy: ${GRN}RUNNING${NC}"; else echo -e "WebProxy: ${RED}STOPPED/ERROR${NC}"; fi
-fi
+if systemctl is-active --quiet telemt; then echo -e "Telemt: ${GRN}RUNNING${NC}"; else echo -e "Telemt: ${RED}STOPPED/ERROR${NC}"; fi
+if systemctl is-active --quiet tproxy-server; then echo -e "WebProxy: ${GRN}RUNNING${NC}"; else echo -e "WebProxy: ${RED}STOPPED/ERROR${NC}"; fi
 
 if systemctl is-active --quiet nginx; then
     echo -e "Nginx: ${GRN}RUNNING${NC}"
@@ -983,19 +696,11 @@ fi
 
 echo -e "\n"
 
-if [ "$INSTALL_MTP" = true ]; then
-    echo -e "${YEL}Telegram Web Proxy для ТГ:${NC}"
-    echo -e "${CYAN}$MTProto${NC}\n"
-fi
+echo -e "${YEL}Telegram Web Proxy для ТГ:${NC}"
+echo -e "${CYAN}$MTProto${NC}\n"
 
-echo -e "${YEL}VLESS XHTTP TLS stream-up (Порт 443 TCP - для моста) ${NC}
-$linkTLS2
-
-${YEL}VLESS RAW TLS VISION (Порт 443 TCP) ${NC}
-$linkTLS1
-
-${YEL}HYSTERIA2 (Порт 443 UDP) ${NC}
-$hy2
+echo -e "${YEL}VLESS REALITY VISION (Порт 443 TCP) ${NC}
+$linkREALITY
 
 ${YEL}Ваша json страничка подписки ${NC}
 $subPageLink
