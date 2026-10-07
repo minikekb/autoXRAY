@@ -17,10 +17,15 @@ sleep 1
 [[ "$ID" =~ ^(debian|ubuntu)$ ]] || { echo -e "${RED}❌ Ошибка: поддерживаются только Debian и Ubuntu!${NC}"; exit 1; }
 [[ "$ID" == "ubuntu" ]] && echo -e "${YEL}⚠️ Внимание: запуск на Ubuntu. Рекомендованная система: Debian 12/13.${NC}"
 
-DOMAIN=$1
+DOMAIN=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
 
 if [ -z "$DOMAIN" ]; then
     echo -e "${RED}❌ Ошибка: домен не задан.${NC}"
+    exit 1
+fi
+
+if [[ ! "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || (( ${#DOMAIN} > 253 )); then
+    echo -e "${RED}❌ Укажите домен в ASCII/IDNA формате, например example.com или xn--....${NC}"
     exit 1
 fi
 
