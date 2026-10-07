@@ -1,12 +1,22 @@
-# autoXRAY — VLESS REALITY и Telegram Web Proxy
+# autoXRAY — VLESS REALITY, Telegram Web Proxy и WARP
 
-Установщик для личного сервера на Debian 12/13 и Ubuntu. Настраивает только:
+Установщик для личного сервера на Debian 12/13 и Ubuntu. Настраивает:
 
 - **VLESS TCP REALITY + Vision** на внешнем TCP-порту **443**;
-- **Telegram Web Proxy** на том же внешнем HTTPS-порту **443**.
-- **WARP WireProxy** как локальный SOCKS5 для IP-проверок, Habr, Canva, WhatsApp и Google Gemini.
+- **Telegram Web Proxy** на том же внешнем HTTPS-порту **443**;
+- **WARP WireProxy** как локальный SOCKS5-выход для выбранных доменов.
 
-Xray принимает соединения на `:443`. Обычный HTTPS-трафик (включая Telegram Web Proxy) передаётся локальному Nginx на `127.0.0.1:8443`. Сертификат для сайта-заглушки выпускается через ACME, порт 80 нужен для проверки домена и перенаправления HTTPS.
+Xray принимает соединения на `:443`. Обычный HTTPS-трафик, включая Telegram Web Proxy, передаётся локальному Nginx на `127.0.0.1:8443`. Сертификат для сайта-заглушки выпускается через ACME; порт 80 нужен для проверки домена и перенаправления HTTPS.
+
+Клиентский конфиг направляет перечисленные ниже домены через VLESS на сервер. На сервере Xray отправляет этот трафик через локальный SOCKS5 WireProxy в WARP. Остальные запросы обслуживаются обычными правилами маршрутизации. WARP не меняет IP самого сервера и не влияет на Telegram Web Proxy.
+
+Через WARP направляются:
+
+- Проверка IP: `2ip.ru`, `2ip.io`, `ifconfig.me`, `checkip.amazonaws.com`, `pify.org`, `geosite:category-ip-geo-detect`;
+- `habr.com`;
+- Canva: `geosite:canva`;
+- WhatsApp: `geosite:whatsapp`;
+- Google Gemini: `geosite:google-gemini`.
 
 ## Требования
 
@@ -23,7 +33,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/minikekb/autoXRAY/realit
 
 После установки скрипт покажет ссылку VLESS REALITY, ссылку Telegram Web Proxy и адрес страницы с конфигурациями. VLESS-конфигурацию можно импортировать в совместимый с Xray клиент.
 
-Установщик автоматически разворачивает WireProxy из скрипта [fscarmen/warp](https://gitlab.com/fscarmen/warp) и проверяет локальный SOCKS5 на `127.0.0.1:40000`. Запросы к `2ip.ru`, `2ip.io`, IP-проверкам (`ifconfig.me`, `checkip.amazonaws.com`, `pify.org`, `geosite:category-ip-geo-detect`), Habr, Canva, WhatsApp и Google Gemini, направленные клиентом через VLESS, Xray отправляет через WARP. WARP не меняет внешний IP самого сервера и не влияет на Web Proxy TG.
+Установщик автоматически устанавливает и запускает WireProxy с помощью скрипта [fscarmen/warp](https://gitlab.com/fscarmen/warp). SOCKS5 доступен только локально на `127.0.0.1:40000`; установщик проверяет службу и порт перед генерацией конфига Xray.
 
 ## Службы и конфигурации
 
@@ -33,7 +43,20 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/minikekb/autoXRAY/realit
 - Telegram Web Proxy: `/etc/tproxy-server/`
 - WARP WireProxy: служба `wireproxy`, SOCKS5 `127.0.0.1:40000`
 
-Перезапуск Xray: `systemctl restart xray`. Статус служб: `systemctl status xray nginx telemt tproxy-server`.
+Перезапуск Xray: `systemctl restart xray`. Статус служб: `systemctl status xray nginx telemt tproxy-server wireproxy`.
+
+Проверить WARP-прокси можно на сервере:
+
+```bash
+systemctl status wireproxy
+curl --socks5-hostname 127.0.0.1:40000 https://ifconfig.me
+```
+
+Для проверки синтаксиса конфига Xray:
+
+```bash
+xray run -test -config /usr/local/etc/xray/config.json
+```
 
 ## Удаление
 
