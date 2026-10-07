@@ -248,9 +248,8 @@ SCRIPT_DIR=/usr/local/etc/xray
 xray_uuid_vrv=$(xray uuid)
 xray_shortIds_vrv=$(openssl rand -hex 8)
 reality_keys=$(xray x25519)
-xray_reality_private=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/PrivateKey:/ {print $2; exit}')
-xray_reality_public=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/Password:/ {print $2; exit}')
-[[ -n "$xray_reality_public" ]] || xray_reality_public=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/Public key:/ {print $2; exit}')
+xray_reality_private=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/^(PrivateKey|Private key):/ {print $2; exit}')
+xray_reality_public=$(printf '%s\n' "$reality_keys" | awk -F ': ' '/^Password( \(PublicKey\))?:/ || /^Public key:/ || /^PublicKey:/ {print $2; exit}')
 if [[ -z "$xray_reality_private" || -z "$xray_reality_public" ]]; then
     echo -e "${RED}❌ Не удалось получить ключи REALITY из xray x25519.${NC}"
     exit 1
