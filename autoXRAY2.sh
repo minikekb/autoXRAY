@@ -258,8 +258,26 @@ fi
 socksUser=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 6)
 socksPasw=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 16)
 
+# Устанавливаем WireProxy/WARP как локальный SOCKS5 для выбранных маршрутов.
+# Слушатель привязан к loopback и не открывается наружу.
+WARP_SOCKS_PORT=40000
+if systemctl is-active --quiet wireproxy && ss -ltnH | awk -v port="127.0.0.1:${WARP_SOCKS_PORT}" '$4 == port { found=1 } END { exit !found }'; then
+    echo -e "${GRN}WARP WireProxy уже запущен на 127.0.0.1:${WARP_SOCKS_PORT}.${NC}"
+else
+    echo -e "${YEL}Устанавливаем WARP WireProxy (SOCKS5 127.0.0.1:${WARP_SOCKS_PORT})...${NC}"
+    if ! echo -e "1\n1\n${WARP_SOCKS_PORT}" | bash <(curl -fsSL https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh) w; then
+        echo -e "${RED}❌ Не удалось установить WARP WireProxy.${NC}"
+        exit 1
+    fi
+fi
+
+if ! systemctl is-active --quiet wireproxy || ! ss -ltnH | awk -v port="127.0.0.1:${WARP_SOCKS_PORT}" '$4 == port { found=1 } END { exit !found }'; then
+    echo -e "${RED}❌ WARP WireProxy не слушает порт ${WARP_SOCKS_PORT}; Xray не будет настроен с нерабочим WARP-маршрутом.${NC}"
+    exit 1
+fi
+
 # Экспортируем переменные для envsubst
-export xray_uuid_vrv xray_shortIds_vrv xray_reality_private xray_reality_public DOMAIN path_subpage WEB_PATH socksUser socksPasw
+export xray_uuid_vrv xray_shortIds_vrv xray_reality_private xray_reality_public DOMAIN path_subpage WEB_PATH socksUser socksPasw WARP_SOCKS_PORT
 
 # Создаем JSON конфигурацию сервера Xray
 cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
@@ -332,11 +350,30 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
     {
       "tag": "block",
       "protocol": "blackhole"
+    },
+    {
+      "tag": "warp",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": ${WARP_SOCKS_PORT}
+          }
+        ]
+      }
     }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "domain": [
+          "domain:2ip.ru",
+          "domain:2ip.io"
+        ],
+        "outboundTag": "warp"
+      },
       {
         "ip": [
           "geoip:private"
@@ -366,9 +403,7 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
         "domain": [
           "ifconfig.me",
           "checkip.amazonaws.com",
-          "pify.org",
-          "2ip.io",
-          "geosite:category-ip-geo-detect"
+          "pify.org"
         ]
       }
     ]
@@ -426,7 +461,9 @@ print_config() {
       {
         "domain": [
           "habr.com",
-          "apkmirror.com"
+          "apkmirror.com",
+          "domain:2ip.ru",
+          "domain:2ip.io"
         ],
         "outboundTag": "proxy"
       },
@@ -436,11 +473,9 @@ print_config() {
           "ifconfig.me",
           "checkip.amazonaws.com",
           "pify.org",
-          "2ip.io",
           "domain:ru",
           "domain:su",
           "domain:xn--p1ai",
-          "geosite:category-ip-geo-detect",
           "geosite:apple",
           "geosite:apple-pki",
           "geosite:f-droid",

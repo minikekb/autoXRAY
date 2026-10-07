@@ -4,6 +4,7 @@
 
 - **VLESS TCP REALITY + Vision** на внешнем TCP-порту **443**;
 - **Telegram Web Proxy** на том же внешнем HTTPS-порту **443**.
+- **WARP WireProxy** как локальный SOCKS5 для доменов `2ip.ru` и `2ip.io`.
 
 Xray принимает соединения на `:443`. Обычный HTTPS-трафик (включая Telegram Web Proxy) передаётся локальному Nginx на `127.0.0.1:8443`. Сертификат для сайта-заглушки выпускается через ACME, порт 80 нужен для проверки домена и перенаправления HTTPS.
 
@@ -22,12 +23,15 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/xVRVx/autoXRAY/main/auto
 
 После установки скрипт покажет ссылку VLESS REALITY, ссылку Telegram Web Proxy и адрес страницы с конфигурациями. VLESS-конфигурацию можно импортировать в совместимый с Xray клиент.
 
+Установщик автоматически разворачивает WireProxy из скрипта [fscarmen/warp](https://gitlab.com/fscarmen/warp) и проверяет локальный SOCKS5 на `127.0.0.1:40000`. Запросы к `2ip.ru` и `2ip.io`, направленные клиентом через VLESS, Xray отправляет через WARP. WARP не меняет внешний IP самого сервера и не влияет на Web Proxy TG.
+
 ## Службы и конфигурации
 
 - Xray: `/usr/local/etc/xray/config.json`
 - Nginx: `/etc/nginx/conf.d/default.conf`
 - Telemt: `/etc/telemt/telemt.toml`
 - Telegram Web Proxy: `/etc/tproxy-server/`
+- WARP WireProxy: служба `wireproxy`, SOCKS5 `127.0.0.1:40000`
 
 Перезапуск Xray: `systemctl restart xray`. Статус служб: `systemctl status xray nginx telemt tproxy-server`.
 
