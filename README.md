@@ -4,7 +4,7 @@
 
 - **VLESS TCP REALITY + Vision** на внешнем TCP-порту **443**;
 - **Telegram Web Proxy** на том же внешнем HTTPS-порту **443**.
-- **WARP WireProxy** как локальный SOCKS5 для доменов `2ip.ru` и `2ip.io`.
+- **WARP WireProxy** как локальный SOCKS5 для IP-проверок, Habr, Canva, WhatsApp и Google Gemini.
 
 Xray принимает соединения на `:443`. Обычный HTTPS-трафик (включая Telegram Web Proxy) передаётся локальному Nginx на `127.0.0.1:8443`. Сертификат для сайта-заглушки выпускается через ACME, порт 80 нужен для проверки домена и перенаправления HTTPS.
 
@@ -18,12 +18,12 @@ Xray принимает соединения на `:443`. Обычный HTTPS-�
 ## Установка
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/xVRVx/autoXRAY/main/autoXRAY2.sh)" -- вашДОМЕН.com
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/minikekb/autoXRAY/reality-webproxy/autoXRAY2.sh)" -- вашДОМЕН.com
 ```
 
 После установки скрипт покажет ссылку VLESS REALITY, ссылку Telegram Web Proxy и адрес страницы с конфигурациями. VLESS-конфигурацию можно импортировать в совместимый с Xray клиент.
 
-Установщик автоматически разворачивает WireProxy из скрипта [fscarmen/warp](https://gitlab.com/fscarmen/warp) и проверяет локальный SOCKS5 на `127.0.0.1:40000`. Запросы к `2ip.ru` и `2ip.io`, направленные клиентом через VLESS, Xray отправляет через WARP. WARP не меняет внешний IP самого сервера и не влияет на Web Proxy TG.
+Установщик автоматически разворачивает WireProxy из скрипта [fscarmen/warp](https://gitlab.com/fscarmen/warp) и проверяет локальный SOCKS5 на `127.0.0.1:40000`. Запросы к `2ip.ru`, `2ip.io`, IP-проверкам (`ifconfig.me`, `checkip.amazonaws.com`, `pify.org`, `geosite:category-ip-geo-detect`), Habr, Canva, WhatsApp и Google Gemini, направленные клиентом через VLESS, Xray отправляет через WARP. WARP не меняет внешний IP самого сервера и не влияет на Web Proxy TG.
 
 ## Службы и конфигурации
 

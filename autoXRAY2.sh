@@ -370,7 +370,15 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
       {
         "domain": [
           "domain:2ip.ru",
-          "domain:2ip.io"
+          "domain:2ip.io",
+          "ifconfig.me",
+          "checkip.amazonaws.com",
+          "pify.org",
+          "geosite:category-ip-geo-detect",
+          "habr.com",
+          "geosite:canva",
+          "geosite:whatsapp",
+          "geosite:google-gemini"
         ],
         "outboundTag": "warp"
       },
@@ -397,14 +405,6 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
           "geosite:private"
         ],
         "outboundTag": "block"
-      },
-      {
-        "outboundTag": "block",
-        "domain": [
-          "ifconfig.me",
-          "checkip.amazonaws.com",
-          "pify.org"
-        ]
       }
     ]
   }
@@ -462,17 +462,21 @@ print_config() {
         "domain": [
           "habr.com",
           "apkmirror.com",
+          "ifconfig.me",
+          "checkip.amazonaws.com",
+          "pify.org",
           "domain:2ip.ru",
-          "domain:2ip.io"
+          "domain:2ip.io",
+          "geosite:category-ip-geo-detect",
+          "geosite:canva",
+          "geosite:whatsapp",
+          "geosite:google-gemini"
         ],
         "outboundTag": "proxy"
       },
       {
         "domain": [
           "geosite:private",
-          "ifconfig.me",
-          "checkip.amazonaws.com",
-          "pify.org",
           "domain:ru",
           "domain:su",
           "domain:xn--p1ai",
